@@ -3,8 +3,9 @@
 ## Prerequisites
 
 1. Python 3.8 or higher
-2. A Notion account with an integration token
-3. Two Notion databases set up with the correct structure
+2. uv (Python package manager) - install from https://docs.astral.sh/uv/getting-started/installation/
+3. A Notion account with an integration token
+4. Two Notion databases set up with the correct structure
 
 ## Setting Up Notion
 
@@ -80,14 +81,14 @@ cd /Users/kimdebie/Documents/
 
 ```bash
 cd swedish_learning_mcp
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+uv venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 ```
 
 ### 3. Install Dependencies
 
 ```bash
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 ```
 
 ### 4. Configure Environment Variables
@@ -107,7 +108,7 @@ pip install -r requirements.txt
 ### 5. Test the Installation
 
 ```bash
-python -m swedish_learning_mcp.server
+uv run python -m swedish_learning_mcp.server
 ```
 
 You should see: "Swedish Learning MCP initialized successfully"
@@ -123,8 +124,10 @@ Add this to your Claude Desktop configuration file:
 {
   "mcpServers": {
     "swedish-learning": {
-      "command": "python",
+      "command": "uv",
       "args": [
+        "run",
+        "python",
         "-m",
         "swedish_learning_mcp.server"
       ],

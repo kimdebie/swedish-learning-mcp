@@ -1,72 +1,17 @@
-import os
-from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
-from notion_client import Client as NotionClient
-from dotenv import load_dotenv
+from datetime import datetime
+from typing import List, Dict, Any
 from mcp_server import mcp
-
-# Load environment variables
-load_dotenv()
-NOTION_TOKEN = os.getenv("NOTION_TOKEN")
-VOCAB_DATABASE_ID = os.getenv("VOCAB_DATABASE_ID")
-GRAMMAR_DATABASE_ID = os.getenv("GRAMMAR_DATABASE_ID")
+from utils import (
+    notion_client, 
+    VOCAB_DATABASE_ID,
+    _get_notion_property,
+    calculate_days_overdue,
+    calculate_new_mastery_level,
+    calculate_weighted_success_rate
+)
 
 # Cache for storing data
 CACHE: Dict[str, Any] = {}
-
-if not NOTION_TOKEN or not VOCAB_DATABASE_ID or not GRAMMAR_DATABASE_ID:
-    print("Error: NOTION_TOKEN, VOCAB_DATABASE_ID, and GRAMMAR_DATABASE_ID environment variables must be set")
-
-notion_client = NotionClient(auth=NOTION_TOKEN) if NOTION_TOKEN else None
-
-def _extract_rich_text(rich_text: list) -> str:
-    """Extract plain text from Notion's rich text objects."""
-    return "".join(text_obj.get("plain_text", "") for text_obj in rich_text)
-
-def _get_notion_property(page: dict, prop_name: str, prop_type: str = "rich_text") -> Any:
-    """Extract property value from Notion page."""
-    try:
-        prop = page.get("properties", {}).get(prop_name, {})
-        
-        if prop_type == "rich_text":
-            return _extract_rich_text(prop.get("rich_text", []))
-        elif prop_type == "title":
-            return _extract_rich_text(prop.get("title", []))
-        elif prop_type == "select":
-            select_obj = prop.get("select")
-            return select_obj.get("name") if select_obj else None
-        elif prop_type == "number":
-            return prop.get("number", 0)
-        elif prop_type == "date":
-            date_obj = prop.get("date")
-            return date_obj.get("start") if date_obj else None
-        else:
-            return prop.get(prop_type)
-    except Exception:
-        return None
-
-def _calculate_days_overdue(last_reviewed: str, mastery_level: str) -> int:
-    """Calculate how many days a word is overdue for review."""
-    if not last_reviewed:
-        return 999  # Never reviewed
-    
-    try:
-        last_date = datetime.fromisoformat(last_reviewed.replace('Z', '+00:00'))
-        now = datetime.now()
-        days_since = (now - last_date).days
-        
-        # Spaced repetition intervals based on mastery
-        intervals = {
-            "New": 1,
-            "Learning": 3,
-            "Familiar": 7,
-            "Mastered": 30
-        }
-        
-        interval = intervals.get(mastery_level, 1)
-        return max(0, days_since - interval)
-    except Exception:
-        return 0
 
 @mcp.tool()
 async def add_vocabulary_word(
@@ -132,7 +77,7 @@ async def get_vocabulary_for_review(limit: int = 20) -> str:
             last_reviewed = _get_notion_property(page, "Last Reviewed", "date")
             example_sentence = _get_notion_property(page, "Example Sentence")
             
-            days_overdue = _calculate_days_overdue(last_reviewed, mastery_level or "New")
+            days_overdue = calculate_days_overdue(last_reviewed, mastery_level or "New")
             
             if days_overdue > 0:  # Due for review
                 words_for_review.append({
@@ -183,21 +128,11 @@ async def update_word_mastery(word_id: str, correct_answers: int, total_answers:
         session_success_rate = (correct_answers / total_answers) * 100 if total_answers > 0 else 0
         new_review_count = current_review_count + 1
         
-        # Weighted average of success rates
-        if current_review_count > 0:
-            new_success_rate = ((current_success_rate * current_review_count) + session_success_rate) / new_review_count
-        else:
-            new_success_rate = session_success_rate
+        # Calculate weighted average success rate
+        new_success_rate = calculate_weighted_success_rate(current_success_rate, current_review_count, session_success_rate)
         
-        # Determine new mastery level based on success rate and review count
-        if new_success_rate >= 90 and new_review_count >= 5:
-            new_mastery_level = "Mastered"
-        elif new_success_rate >= 75 and new_review_count >= 3:
-            new_mastery_level = "Familiar"
-        elif new_review_count >= 1:
-            new_mastery_level = "Learning"
-        else:
-            new_mastery_level = "New"
+        # Determine new mastery level
+        new_mastery_level = calculate_new_mastery_level(new_success_rate, new_review_count)
         
         # Update the page
         notion_client.pages.update(
